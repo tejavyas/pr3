@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/signal.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <fcntl.h>
 #include <printf.h>
 #include <signal.h>
@@ -12,9 +14,8 @@
 
 #include "cache-student.h"
 #include "gfserver.h"
+#include "shm_channel.h"
 
-// Note that the -n and -z parameters are NOT used for Part 1 
-                        
 #define USAGE                                                                         \
 "usage:\n"                                                                            \
 "  webproxy [options]\n"                                                              \
@@ -27,7 +28,6 @@
 "  -h                  Show this help message\n"
 
 
-// Options
 static struct option gLongOptions[] = {
   {"server",        required_argument,      NULL,           's'},
   {"segment-count", required_argument,      NULL,           'n'},
@@ -35,20 +35,35 @@ static struct option gLongOptions[] = {
   {"thread-count",  required_argument,      NULL,           't'},
   {"segment-size",  required_argument,      NULL,           'z'},         
   {"help",          no_argument,            NULL,           'h'},
-
-  {"hidden",        no_argument,            NULL,           'i'}, // server side 
+  {"hidden",        no_argument,            NULL,           'i'},
   {NULL,            0,                      NULL,            0}
 };
 
 
-//gfs
 static gfserver_t gfs;
-//handles cache
+static shm_pool_t *g_pool = NULL;
+static proxy_worker_arg_t g_worker_arg;
+
 extern ssize_t handle_with_cache(gfcontext_t *ctx, char *path, void* arg);
+
+static int try_connect_cache(void) {
+	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0) return -1;
+	struct sockaddr_un addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, CACHE_CMD_SOCKET_PATH, sizeof(addr.sun_path) - 1);
+	int r = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+	close(fd);
+	return r;
+}
 
 static void _sig_handler(int signo){
   if (signo == SIGTERM || signo == SIGINT){
-    //cleanup could go here
+    if (g_pool) {
+      shm_pool_destroy(g_pool);
+      g_pool = NULL;
+    }
     gfserver_stop(&gfs);
     exit(signo);
   }
@@ -62,7 +77,6 @@ int main(int argc, char **argv) {
   unsigned short nworkerthreads = 8;
   size_t segsize = 5712;
 
-  //disable buffering on stdout so it prints immediately */
   setbuf(stdout, NULL);
 
   if (signal(SIGTERM, _sig_handler) == SIG_ERR) {
@@ -75,7 +89,6 @@ int main(int argc, char **argv) {
     exit(SERVER_FAILURE);
   }
 
-  // Parse and set command line arguments */
   while ((option_char = getopt_long(argc, argv, "s:qht:xn:p:lz:", gLongOptions, NULL)) != -1) {
     switch (option_char) {
       default:
@@ -101,11 +114,9 @@ int main(int argc, char **argv) {
         nworkerthreads = atoi(optarg);
         break;
       case 'i':
-      //do not modify
       case 'O':
       case 'A':
       case 'N':
-            //do not modify
       case 'k':
         break;
     }
@@ -135,28 +146,27 @@ int main(int argc, char **argv) {
     exit(__LINE__);
   }
 
+  g_pool = shm_pool_create(nsegments, segsize);
+  if (!g_pool) {
+    fprintf(stderr, "Failed to create shared memory pool\n");
+    exit(SERVER_FAILURE);
+  }
+  g_worker_arg.pool = g_pool;
 
+  while (try_connect_cache() != 0) {
+    sleep(1);
+  }
 
-  /* Initialize shared memory set-up here
-
-  // Initialize server structure here
-  */
   gfserver_init(&gfs, nworkerthreads);
-
-  // Set server options here
   gfserver_setopt(&gfs, GFS_PORT, port);
   gfserver_setopt(&gfs, GFS_WORKER_FUNC, handle_with_cache);
   gfserver_setopt(&gfs, GFS_MAXNPENDING, 187);
 
-  // Set up arguments for worker here
-  for(int i = 0; i < nworkerthreads; i++) {
-    gfserver_setopt(&gfs, GFS_WORKER_ARG, i, "data");
+  for (int i = 0; i < nworkerthreads; i++) {
+    gfserver_setopt(&gfs, GFS_WORKER_ARG, i, &g_worker_arg);
   }
-  
-  // Invokethe framework - this is an infinite loop and will not return
-  gfserver_serve(&gfs);
 
-  // line never reached
+  gfserver_serve(&gfs);
   return -1;
 
 }

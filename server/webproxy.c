@@ -10,7 +10,6 @@
 "  -t [thread_count]   Num worker threads (Default is 8, Range is 1-80)\n"          
 
 
-/* OPTIONS DESCRIPTOR ====================================================== */
 static struct option gLongOptions[] = {
   {"help",          no_argument,            NULL,           'h'},
   {"thread-count",  required_argument,      NULL,           't'},
@@ -41,7 +40,6 @@ int main(int argc, char **argv) {
   unsigned short nworkerthreads = 8;
   const char *server = "https://raw.githubusercontent.com/gt-cs6200/image_data";
 
-  // disable buffering on stdout
   setbuf(stdout, NULL);
 
   if (signal(SIGINT, _sig_handler) == SIG_ERR){
@@ -54,7 +52,6 @@ int main(int argc, char **argv) {
     exit(SERVER_FAILURE);
   }
 
-  // Parse and set command line arguments
   while ((option_char = getopt_long(argc, argv, "p:qs:xt:h", gLongOptions, NULL)) != -1) {
     switch (option_char) {
       case 'a':
@@ -95,19 +92,14 @@ int main(int argc, char **argv) {
     exit(__LINE__);
   }
 
-  // Initialize server structure here
   gfserver_init(&gfs, nworkerthreads);
-// Set server options here
   gfserver_setopt(&gfs, GFS_MAXNPENDING, 90);
   gfserver_setopt(&gfs, GFS_WORKER_FUNC, handle_with_file);
   gfserver_setopt(&gfs, GFS_PORT, port);
-  // Set up arguments for worker here
-  for(i = 0; i < nworkerthreads; i++) {
-    gfserver_setopt(&gfs, GFS_WORKER_ARG, i, "arg");
+  for (i = 0; i < nworkerthreads; i++) {
+    gfserver_setopt(&gfs, GFS_WORKER_ARG, i, (void *) server);
   }
-  // Invoke the framework - this is an infinite loop and shouldn't return
   gfserver_serve(&gfs);
-  // not reached
   return -2211;
 
 }
