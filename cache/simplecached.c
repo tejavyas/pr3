@@ -76,8 +76,8 @@ static void handle_client(int client_fd) {
 		return;
 	}
 
-	int fd = simplecache_get(req.path);
-	if (fd < 0) {
+	int orig_fd = simplecache_get(req.path);
+	if (orig_fd < 0) {
 		unsigned char buf[CACHE_RESPONSE_WIRE_SIZE];
 		memset(buf, 0, sizeof(buf));
 		int zero = 0;
@@ -89,6 +89,18 @@ static void handle_client(int client_fd) {
 		close(client_fd);
 		return;
 	}
+
+	int fd = dup(orig_fd);
+	if (fd < 0) {
+		unsigned char buf[CACHE_RESPONSE_WIRE_SIZE];
+		memset(buf, 0, sizeof(buf));
+		int zero = 0;
+		memcpy(buf, &zero, 4);
+		write(client_fd, buf, sizeof(buf));
+		close(client_fd);
+		return;
+	}
+	lseek(fd, 0, SEEK_SET);
 
 	struct stat st;
 	if (fstat(fd, &st) != 0) {
@@ -131,10 +143,15 @@ static void handle_client(int client_fd) {
 	while (remaining > 0) {
 		if (sem_wait(sem_cw) != 0) break;
 		size_t chunk = remaining > data_cap ? data_cap : remaining;
+		size_t bytes_read = 0;
+		while (bytes_read < chunk) {
+			ssize_t rd = read(fd, (char *)shm_ptr + bytes_read, chunk - bytes_read);
+			if (rd <= 0) break;
+			bytes_read += (size_t)rd;
+		}
+		if (bytes_read != chunk) break;
 		uint64_t chunk_u = (uint64_t)chunk;
 		memcpy(header_slot, &chunk_u, CHUNK_HEADER_SIZE);
-		ssize_t rd = read(fd, shm_ptr, chunk);
-		if (rd <= 0 || (size_t)rd != chunk) break;
 		remaining -= chunk;
 		sem_post(sem_pr);
 	}
