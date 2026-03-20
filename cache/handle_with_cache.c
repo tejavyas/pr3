@@ -7,6 +7,7 @@
 #include <sys/un.h>
 #include <errno.h>
 #include <stdint.h>
+#include <time.h>
 
 static int connect_and_request(const char *path, const char *shm_name, size_t seg_size,
                                cache_response_t *resp) {
@@ -72,21 +73,19 @@ ssize_t handle_with_cache(gfcontext_t *ctx, const char *path, void *arg) {
 		return SERVER_FAILURE;
 	}
 
-	sem_post(seg.sem_cw);
 	size_t total_sent = 0;
 	char *base = (char *)seg.base;
 	while (total_sent < file_len) {
-		if (sem_wait(seg.sem_pr) != 0) {
+		struct timespec ts;
+		clock_gettime(CLOCK_REALTIME, &ts);
+		ts.tv_sec += 2;
+		if (sem_timedwait(seg.sem_pr, &ts) != 0) {
 			shm_pool_release(wa->pool, &seg);
 			return SERVER_FAILURE;
 		}
 		uint64_t chunk_u;
 		memcpy(&chunk_u, base, CHUNK_HEADER_SIZE);
 		size_t chunk_len = (size_t)chunk_u;
-		if (chunk_len == 0) {
-			sem_post(seg.sem_cw);
-			break;
-		}
 		if (chunk_len > seg.seg_size - CHUNK_HEADER_SIZE) {
 			shm_pool_release(wa->pool, &seg);
 			return SERVER_FAILURE;

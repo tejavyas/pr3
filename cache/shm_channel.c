@@ -162,7 +162,10 @@ int shm_pool_get(shm_pool_t *pool, shm_segment_t *out) {
 }
 
 void shm_pool_release(shm_pool_t *pool, shm_segment_t *seg) {
-	(void)seg;
+	while (sem_trywait(seg->sem_cw) == 0);
+	while (sem_trywait(seg->sem_pr) == 0);
+	sem_post(seg->sem_cw);
+
 	pthread_mutex_lock(&pool->lock);
 	for (unsigned int i = 0; i < pool->nsegments; i++) {
 		if (pool->segments[i].base == seg->base) {

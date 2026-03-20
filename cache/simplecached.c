@@ -139,16 +139,6 @@ static void handle_client(int client_fd) {
 		sem_post(sem_pr);
 	}
 
-	if (remaining == 0) {
-		sem_wait(sem_cw);
-		{
-			uint64_t zero = 0;
-			memcpy(header_slot, &zero, CHUNK_HEADER_SIZE);
-		}
-		sem_post(sem_pr);
-		sem_wait(sem_cw);
-	}
-
 	close(fd);
 	shm_detach(shm_ptr, req.seg_size, shm_fd, sem_cw, sem_pr);
 	close(client_fd);
